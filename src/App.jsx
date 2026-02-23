@@ -7,7 +7,12 @@ import {
   signOut,
   updateProfile,
 } from "firebase/auth";
-import { auth, googleProvider, isFirebaseConfigured } from "./firebaseClient";
+import {
+  auth,
+  googleProvider,
+  isFirebaseConfigured,
+  missingFirebaseEnvKeys,
+} from "./firebaseClient";
 
 const STORAGE_KEY = "daily_tasks_v1";
 const THEME_KEY = "daily_tasks_theme_v1";
@@ -382,6 +387,9 @@ function App() {
           <p className="auth-copy">
             Add your Firebase keys to `.env` using `.env.example`, then restart `npm run dev`.
           </p>
+          {missingFirebaseEnvKeys.length ? (
+            <p className="auth-error">Missing: {missingFirebaseEnvKeys.join(", ")}</p>
+          ) : null}
         </div>
       </div>
     );

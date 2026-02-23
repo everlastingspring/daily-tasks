@@ -8,7 +8,18 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-const hasConfig = Object.values(firebaseConfig).every(Boolean);
+const requiredEnvMap = {
+  VITE_FIREBASE_API_KEY: firebaseConfig.apiKey,
+  VITE_FIREBASE_AUTH_DOMAIN: firebaseConfig.authDomain,
+  VITE_FIREBASE_PROJECT_ID: firebaseConfig.projectId,
+  VITE_FIREBASE_APP_ID: firebaseConfig.appId,
+};
+
+const missingFirebaseEnvKeys = Object.entries(requiredEnvMap)
+  .filter(([, value]) => !value)
+  .map(([key]) => key);
+
+const hasConfig = missingFirebaseEnvKeys.length === 0;
 
 let auth = null;
 let googleProvider = null;
@@ -20,4 +31,5 @@ if (hasConfig) {
 }
 
 export const isFirebaseConfigured = hasConfig;
+export { missingFirebaseEnvKeys };
 export { auth, googleProvider };
