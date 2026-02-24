@@ -23,6 +23,7 @@ const sampleTaskLists = [
     title: "Today Focus",
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    deadlineAt: Date.now() + 1000 * 60 * 60 * 24,
     tasks: [
       {
         id: crypto.randomUUID(),
@@ -50,6 +51,30 @@ function formatDate(value) {
   });
 }
 
+function formatDateTime(value) {
+  return new Date(value).toLocaleString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function toDateTimeInputValue(timestamp) {
+  if (!timestamp) return "";
+  const d = new Date(timestamp);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function deadlineMeta(deadlineAt) {
+  if (!deadlineAt) return { label: "No deadline", overdue: false };
+  const diff = deadlineAt - Date.now();
+  if (diff < 0) return { label: `Overdue: ${formatDateTime(deadlineAt)}`, overdue: true };
+  return { label: `Due: ${formatDateTime(deadlineAt)}`, overdue: false };
+}
+
 function storageKeyFor(uid) {
   return `${STORAGE_KEY}_${uid}`;
 }
@@ -62,7 +87,7 @@ function loadTaskLists(uid) {
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return sampleTaskLists;
-    return parsed;
+    return parsed.map((list) => ({ ...list, deadlineAt: list.deadlineAt ?? null }));
   } catch {
     return sampleTaskLists;
   }
@@ -80,7 +105,7 @@ function normalizeIdentifierToEmail(identifier) {
   return `${value}@dailytasks.local`;
 }
 
-function LoginScreen({
+function AuthCard({
   authMode,
   setAuthMode,
   identifier,
@@ -95,61 +120,55 @@ function LoginScreen({
   onGoogleAuth,
 }) {
   return (
-    <div className="auth-shell">
-      <div className="auth-card card">
-        <h2>{authMode === "signin" ? "Sign in" : "Create account"}</h2>
-        {authError ? <p className="auth-error">{authError}</p> : null}
+    <div className="auth-card card soft-card" id="auth-access">
+      <h2>{authMode === "signin" ? "Sign in" : "Create account"}</h2>
+      {authError ? <p className="auth-error">{authError}</p> : null}
 
-        <form className="auth-form" onSubmit={onEmailAuth}>
-          {authMode === "signup" ? (
-            <input
-              type="text"
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              placeholder="Display name"
-              autoComplete="name"
-            />
-          ) : null}
+      <form className="auth-form" onSubmit={onEmailAuth}>
+        {authMode === "signup" ? (
           <input
             type="text"
-            value={identifier}
-            onChange={(event) => setIdentifier(event.target.value)}
-            placeholder="Email or username"
-            autoComplete="username"
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+            placeholder="Display name"
+            autoComplete="name"
           />
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Password"
-            autoComplete={authMode === "signin" ? "current-password" : "new-password"}
-          />
-          <button type="submit" disabled={isAuthLoading}>
-            {isAuthLoading
-              ? "Please wait..."
-              : authMode === "signin"
-                ? "Sign in"
-                : "Create account"}
-          </button>
-        </form>
-
-        <div className="auth-divider" aria-hidden="true" />
-
-        <button type="button" className="secondary-btn" onClick={onGoogleAuth} disabled={isAuthLoading}>
-          Continue with Google
+        ) : null}
+        <input
+          type="text"
+          value={identifier}
+          onChange={(event) => setIdentifier(event.target.value)}
+          placeholder="Email or username"
+          autoComplete="username"
+        />
+        <input
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          placeholder="Password"
+          autoComplete={authMode === "signin" ? "current-password" : "new-password"}
+        />
+        <button type="submit" disabled={isAuthLoading}>
+          {isAuthLoading ? "Please wait..." : authMode === "signin" ? "Sign in" : "Create account"}
         </button>
+      </form>
 
-        <p className="auth-switch">
-          {authMode === "signin" ? "New here?" : "Already have an account?"}
-          <button
-            type="button"
-            className="text-btn"
-            onClick={() => setAuthMode((prev) => (prev === "signin" ? "signup" : "signin"))}
-          >
-            {authMode === "signin" ? "Create account" : "Sign in"}
-          </button>
-        </p>
-      </div>
+      <div className="auth-divider" aria-hidden="true" />
+
+      <button type="button" className="secondary-btn" onClick={onGoogleAuth} disabled={isAuthLoading}>
+        Continue with Google
+      </button>
+
+      <p className="auth-switch">
+        {authMode === "signin" ? "New here?" : "Already have an account?"}
+        <button
+          type="button"
+          className="text-btn"
+          onClick={() => setAuthMode((prev) => (prev === "signin" ? "signup" : "signin"))}
+        >
+          {authMode === "signin" ? "Create account" : "Sign in"}
+        </button>
+      </p>
     </div>
   );
 }
@@ -167,6 +186,7 @@ function App() {
   const [taskLists, setTaskLists] = useState([]);
   const [activeTaskListId, setActiveTaskListId] = useState(null);
   const [newTaskListTitle, setNewTaskListTitle] = useState("");
+  const [newTaskListDeadline, setNewTaskListDeadline] = useState("");
   const [newTaskText, setNewTaskText] = useState("");
   const [theme, setTheme] = useState(loadTheme);
 
@@ -228,6 +248,23 @@ function App() {
     [taskLists, activeTaskListId]
   );
 
+  const upcomingTimeline = useMemo(
+    () =>
+      [...taskLists]
+        .filter((item) => item.deadlineAt)
+        .sort((a, b) => a.deadlineAt - b.deadlineAt)
+        .slice(0, 4),
+    [taskLists]
+  );
+
+  const openAuth = (mode) => {
+    setAuthMode(mode);
+    setTimeout(() => {
+      const target = document.getElementById("auth-access");
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 30);
+  };
+
   const handleEmailAuth = async (event) => {
     event.preventDefault();
     setAuthError("");
@@ -281,17 +318,20 @@ function App() {
     const title = newTaskListTitle.trim();
     if (!title) return;
 
+    const now = Date.now();
     const nextTaskList = {
       id: crypto.randomUUID(),
       title,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
+      deadlineAt: newTaskListDeadline ? new Date(newTaskListDeadline).getTime() : null,
       tasks: [],
     };
 
     setTaskLists((prev) => [nextTaskList, ...prev]);
     setActiveTaskListId(nextTaskList.id);
     setNewTaskListTitle("");
+    setNewTaskListDeadline("");
   };
 
   const renameTaskList = (taskListId, title) => {
@@ -302,6 +342,20 @@ function App() {
         return {
           ...taskList,
           title,
+          updatedAt: now,
+        };
+      })
+    );
+  };
+
+  const updateTaskListDeadline = (taskListId, inputValue) => {
+    const now = Date.now();
+    setTaskLists((prev) =>
+      prev.map((taskList) => {
+        if (taskList.id !== taskListId) return taskList;
+        return {
+          ...taskList,
+          deadlineAt: inputValue ? new Date(inputValue).getTime() : null,
           updatedAt: now,
         };
       })
@@ -382,7 +436,7 @@ function App() {
   if (!isFirebaseConfigured) {
     return (
       <div className="auth-shell">
-        <div className="auth-card card">
+        <div className="auth-card card soft-card">
           <h2>Firebase setup needed</h2>
           <p className="auth-copy">
             Add your Firebase keys to `.env` using `.env.example`, then restart `npm run dev`.
@@ -398,7 +452,7 @@ function App() {
   if (isAuthLoading) {
     return (
       <div className="auth-shell">
-        <div className="auth-card card">
+        <div className="auth-card card soft-card">
           <h2>Checking session...</h2>
         </div>
       </div>
@@ -407,20 +461,84 @@ function App() {
 
   if (!authUser) {
     return (
-      <LoginScreen
-        authMode={authMode}
-        setAuthMode={setAuthMode}
-        identifier={identifier}
-        setIdentifier={setIdentifier}
-        password={password}
-        setPassword={setPassword}
-        displayName={displayName}
-        setDisplayName={setDisplayName}
-        authError={authError}
-        isAuthLoading={isSubmittingAuth}
-        onEmailAuth={handleEmailAuth}
-        onGoogleAuth={handleGoogleAuth}
-      />
+      <div className="landing-shell">
+        <header className="topbar soft-card">
+          <div>
+            <p className="kicker">Planning made practical</p>
+            <h1>daily tasks</h1>
+          </div>
+          <button
+            type="button"
+            className="theme-btn"
+            onClick={() => setTheme((prev) => (prev === "light" ? "dark" : "light"))}
+            aria-label={theme === "light" ? "Switch to moon mode" : "Switch to sun mode"}
+            title={theme === "light" ? "Moon" : "Sun"}
+          >
+            {theme === "light" ? "☾" : "☀"}
+          </button>
+        </header>
+
+        <main className="landing-grid">
+          <section className="card soft-card landing-hero">
+            <p className="kicker">Realtime personal planning</p>
+            <h2>Plan each task list with title, timeline and completion flow.</h2>
+            <p>
+              Create task lists, assign date-time deadlines, and track completion with a clean interface built
+              for daily execution.
+            </p>
+            <div className="hero-actions">
+              <button type="button" onClick={() => openAuth("signup")}>Start free</button>
+              <button type="button" className="secondary-btn" onClick={() => openAuth("signin")}>Sign in</button>
+            </div>
+          </section>
+
+          <section className="card soft-card landing-features">
+            <h3>What this app does</h3>
+            <div className="feature-grid">
+              <article className="feature-box">
+                <h4>Task Lists</h4>
+                <p>Group tasks by context and edit titles any time.</p>
+              </article>
+              <article className="feature-box">
+                <h4>Deadline Timeline</h4>
+                <p>Set date-time targets and monitor due/overdue status clearly.</p>
+              </article>
+              <article className="feature-box">
+                <h4>Secure Access</h4>
+                <p>Sign in using Google or email/password with Firebase Auth.</p>
+              </article>
+              <article className="feature-box">
+                <h4>Cross-device Ready</h4>
+                <p>Architecture is ready for Firestore sync as the next upgrade.</p>
+              </article>
+            </div>
+          </section>
+
+          <section className="card soft-card landing-how">
+            <h3>How to use</h3>
+            <ol>
+              <li>Create an account or sign in.</li>
+              <li>Create a task list and set its deadline.</li>
+              <li>Add tasks, mark done, and track timeline progress.</li>
+            </ol>
+          </section>
+
+          <AuthCard
+            authMode={authMode}
+            setAuthMode={setAuthMode}
+            identifier={identifier}
+            setIdentifier={setIdentifier}
+            password={password}
+            setPassword={setPassword}
+            displayName={displayName}
+            setDisplayName={setDisplayName}
+            authError={authError}
+            isAuthLoading={isSubmittingAuth}
+            onEmailAuth={handleEmailAuth}
+            onGoogleAuth={handleGoogleAuth}
+          />
+        </main>
+      </div>
     );
   }
 
@@ -462,24 +580,51 @@ function App() {
               />
               <button type="submit">Add</button>
             </div>
+            <input
+              type="datetime-local"
+              value={newTaskListDeadline}
+              onChange={(event) => setNewTaskListDeadline(event.target.value)}
+            />
           </form>
 
           <section>
             <h2>Tasks ({sortedTaskLists.length})</h2>
             <ul className="list">
-              {sortedTaskLists.map((taskList) => (
-                <li key={taskList.id}>
-                  <button
-                    type="button"
-                    className={`list-item ${taskList.id === activeTaskListId ? "active" : ""}`}
-                    onClick={() => setActiveTaskListId(taskList.id)}
-                  >
-                    <span>{taskList.title}</span>
-                    <small>{formatDate(taskList.createdAt)}</small>
-                  </button>
-                </li>
-              ))}
+              {sortedTaskLists.map((taskList) => {
+                const meta = deadlineMeta(taskList.deadlineAt);
+                return (
+                  <li key={taskList.id}>
+                    <button
+                      type="button"
+                      className={`list-item ${taskList.id === activeTaskListId ? "active" : ""}`}
+                      onClick={() => setActiveTaskListId(taskList.id)}
+                    >
+                      <div>
+                        <span>{taskList.title}</span>
+                        <small className={meta.overdue ? "overdue" : ""}>{meta.label}</small>
+                      </div>
+                      <small>{formatDate(taskList.createdAt)}</small>
+                    </button>
+                  </li>
+                );
+              })}
               {!sortedTaskLists.length && <li className="empty">No tasks yet.</li>}
+            </ul>
+          </section>
+
+          <section>
+            <h2>Timeline</h2>
+            <ul className="timeline-list">
+              {upcomingTimeline.map((item) => {
+                const meta = deadlineMeta(item.deadlineAt);
+                return (
+                  <li key={item.id}>
+                    <strong>{item.title}</strong>
+                    <small className={meta.overdue ? "overdue" : ""}>{meta.label}</small>
+                  </li>
+                );
+              })}
+              {!upcomingTimeline.length && <li className="empty">No deadlines set yet.</li>}
             </ul>
           </section>
         </aside>
@@ -499,6 +644,19 @@ function App() {
                   />
                 </div>
                 <span className="pill">{activeTaskList.tasks.length} tasks</span>
+              </div>
+
+              <div className="inline-form">
+                <label htmlFor="active-deadline">Task list deadline</label>
+                <input
+                  id="active-deadline"
+                  type="datetime-local"
+                  value={toDateTimeInputValue(activeTaskList.deadlineAt)}
+                  onChange={(event) => updateTaskListDeadline(activeTaskList.id, event.target.value)}
+                />
+                <small className={deadlineMeta(activeTaskList.deadlineAt).overdue ? "overdue" : ""}>
+                  {deadlineMeta(activeTaskList.deadlineAt).label}
+                </small>
               </div>
 
               <form className="inline-form" onSubmit={addTask}>
